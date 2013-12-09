@@ -1,0 +1,5 @@
+export(gen.pcvar)
+export(mc.rank.test)
+export(melt.dat)
+export(rank.test)
+export(trace.test)
