@@ -1,19 +1,31 @@
+#' @description bla!
+#' 
+#' @details bla, bla?
+#'
 #'
 #' @name gen.pcvar 
 #' @aliases gen.pcvar
 #' @title Generates data from a PCVAR model.  
 #' @author Laurent Callot \email{l.callot@@vu.nl}
 #' 
-#' 
-#'
-#' @param Y A molten data set containing the 4 columns. indiv: the individual (country, sector,...) name as factor levels. Year: the year of observation. Period: the period (day, week, month, quarter) index as consecutive integers. Variable: the name of the variable. value: the value of the variable at the given time for a given individual. 
-#' @param bs.method 'resample' for iid resampling, 'wild' for gaussian wild bootstrap.
+#' @param obs An integer, the number of observations to generate.
+#' @param N an integer, the number of cross section units.
+#' @param nvar The number of variables for each cross section unit.
+#' @param Alpha Adjustment matrix (dimension nvar * rank) or list (length N) of parameter matrices.
+#' @param Beta Co-integration matrix (dimension 2nvar * rank) or list (length N) of parameter matrices.
+#' @param Lambda0 Contemporaneous dependency matrix (dimension nvar  *  nvar) or list (length N) of parameter matrices.
+#' @param Gammal List (length is number of lagged first differences) of matrices (N  *  N) or lists (length N) of matrices.
+#' @param Omega The covariance matrix.
+#' @param err.dist The distribution of the innovations, _gaussian_ or _t_  
+#' @param t.df If the innovations are _t_ distributed, the number of degrees of freedom. default 3.
+#' @param det.type An integer indicating the type of deterministics to use, following the typology by Johansen 1988.
+#' @param burn.smpl The Number of burned observations used to generate the data. 
+#' @param res.dep Dependency of the residuals, _iid_ (default) or _garch_.
+#' @param garchspec See fGarch package. 
+#' @param cdet.load The loadings on the deterministics.
+#' @param W The weighting scheme. Default: equal.
 #'
 #' @return A list. 
-#'
-#'
-#'
-#'
 #'
 #'
 #' @export

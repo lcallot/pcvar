@@ -1,29 +1,19 @@
 Package: pcvar
 Type: Package
 Version: 0.1
-Date: 2013-10-29
+Date: 2014-08-09
 Title: Provides inference methods for panels of co-integrated VARs.
 License: GPL (>= 2)
 Author: Laurent Callot
 Maintainer: Laurent Callot <l.callot@vu.nl>
 LazyLoad: yes
-Description: Provides procedures to test the co-integration rank of a pcvar,
-    and estimate and test for a common co-integration space.
+Description: Estimation and testing in Panels of Co-integrated VAR models. 
 Depends:
     R (>= 3.0.1),
-    reshape2,
-    ggplot2,
-    Matrix,
-    SparseM,
-    glmnet,
+    methods
+Imports:
     geigen,
-    mvtnorm,
-    multicore,
-    xtable
-Collate:
-    'pcvar-internal.R'
-    'rank-test.R'
-    'trace-test.R'
-    'gen-pcvar.R'
-    'melt-dat.R'
-    'mc-rank-test.R'
+    reshape2,
+    Matrix,
+    parallel,
+    mvtnorm

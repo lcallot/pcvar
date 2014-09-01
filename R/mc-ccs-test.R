@@ -3,13 +3,13 @@
 #' @details bla, bla?
 #'
 #'
-#' @name mc.rank.test
-#' @aliases mc.rank.test
-#' @title Performs a Monte Carlo experiment on the performance of the panel rank test procedure of Callot (2013) to a pcvar model.  
+#' @name mc.ccs.test
+#' @aliases mc.ccs.test
+#' @title Performs a Monte Carlo experiment on the performance of the panel Common Co-integration space estimator and test of Callot (2014).  
 #' @author Laurent Callot \email{l.callot@@vu.nl}
 #' 
 #'
-#' 
+#'
 #' @param obs An integer, the number of observations to generate.
 #' @param N an integer, the number of cross section units.
 #' @param nvar The number of variables for each cross section unit.
@@ -17,7 +17,7 @@
 #' @param BS The number of bootstrap iterations for the test. Default: 99.
 #' @param MC The number of monte carlo iterations. Default: 1.
 #' @param Alpha Adjustment matrix (dimension nvar * rank) or list (length N) of parameter matrices.
-#' @param Beta Co-integration matrix (dimension (2*nvar)  *  rank) or list (length N) of parameter matrices.
+#' @param Beta Co-integration matrix (dimension 2nvar * rank) or list (length N) of parameter matrices.
 #' @param Lambda0 Contemporaneous dependency matrix (dimension nvar  *  nvar) or list (length N) of parameter matrices.
 #' @param Gammal List (length is number of lagged first differences) of matrices (N  *  N) or lists (length N) of matrices.
 #' @param Omega The covariance matrix.
@@ -31,6 +31,7 @@
 #' @param W The weighting scheme. Default: equal.
 #' @param bs.method 'resample' for iid resampling, 'wild' for gaussian wild bootstrap.
 #' @param ncores The number of cores, default 1.
+#' @param llest Should the Larsson and Lyhagen 2007 JBES CCS estimator be computed? Default FALSE.
 #'
 #'
 #' @return A list. 
@@ -41,7 +42,7 @@
 #'
 #'
 #' @export
-mc.rank.test <- function(obs,N,nvar,BS=99,MC=1,W='equal',Alpha=NULL,Beta=NULL,Lambda0=NULL,Gammal=NULL,Omega,err.dist='gaussian',det.type=1,cdet.load=c(1,1),bs.method='resample',t.df=1,burn.smpl=10,res.dep='iid',garchspec=NULL,ncores=1){
+mc.ccs.test <- function(obs,N,nvar,rank=1,BS=99,MC=1,W='equal',Alpha=NULL,Beta=NULL,Lambda0=NULL,Gammal=NULL,Omega,err.dist='gaussian',det.type=1,cdet.load=c(1,1),bs.method='resample',t.df=3,burn.smpl=10,res.dep='iid',garchspec=NULL,ncores=1,llest=TRUE){
 
 	# 0/ Chk the arguments
 
@@ -61,17 +62,19 @@ mc.rank.test <- function(obs,N,nvar,BS=99,MC=1,W='equal',Alpha=NULL,Beta=NULL,La
 
 	# 3/ MC loop
 	# Parallel 
-	mcrk <- mclapply(1:MC,.mcrk.i,MC,obs,N,nvar,BS,
+	mcccs <- mclapply(1:MC,.mcccs.i,MC,obs,N,nvar,BS,rank,
 		    W,Alpha,Beta,Lambda0,Gammal,Omega,err.dist,
-		    det.type,cdet.load,bs.method,t.df,res.dep,garchspec,burn.smpl,mc.cores=ncores)
-  
-	#mcrk <- lapply(1:MC,.mcrk.i,MC,obs,N,nvar,BS,
+		    det.type,cdet.load,bs.method,t.df,res.dep,garchspec,burn.smpl,llest,mc.cores=ncores,mc.preschedule=FALSE)
+
+	#mcccs <- lapply(1:MC,.mcccs.i,MC,obs,N,nvar,BS,rank,
 	#	    W,Alpha,Beta,Lambda0,Gammal,Omega,err.dist,
-	#	    det.type,cdet.load,bs.method,t.df,res.dep,garchspec,burn.smpl)
+	#	    det.type,cdet.load,bs.method,t.df,res.dep,garchspec,burn.smpl,llest)
+	#cat('\n')
 
-	# 4/ Aggregate rank test outcome.
-	aggmc <- .agg.mc(mcrk)
-	aggmc$dgproots <- Ysim$roots[[1]]
-
-	return(aggmc)
+  mcagg <- .agg.mc.ccs(mcccs,llest)
+  
+	return(mcagg)
 }
+
+
+

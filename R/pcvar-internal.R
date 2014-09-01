@@ -8,8 +8,9 @@
 	N  <- length(unique(Y$indiv))
 
 	# Creating equal weights if missing W.
-	if(is.null(W)){W <- matrix(1/(N-1),N,N)
-		diag(W) <- 0}
+	if(is.null(W)){W <- matrix(1/(N-1),N,N);diag(W) <- 0}
+  if(length(W)==1){if(W=='equal'){W <- matrix(1/(N-1),N,N);diag(W) <- 0}}
+	if(length(W)==1){if(W=='zero'){W <- matrix(0,N,N)}}
 
 	# Initializing Ystar.
 	Ystar <- Y
@@ -47,10 +48,16 @@
 	DY <- aYi[-1,]-aYi[-nr,]
 
 	# 1st diff of the exo vars
-	DX <- aXi[-1,]-aXi[-nr,]
-	
+	if(!is.null(aXi))DX <- aXi[-1,]-aXi[-nr,]
+	else DX <- NULL
+  
+  # If the star variables are zero, set DX to NULL
+  if(!is.null(DX)) if(sum(abs(DX))==0) DX <- NULL
+  
 	# Lagged levels
-	LZ <- cbind(aYi[-1,],aXi[-1,])
+	LZ <- aYi[-1,]
+	if(!is.null(aXi)) if(sum(abs(aXi))!=0) LZ <- cbind(LZ,aXi[-1,])
+  
 
 	# Lagged 1st diffs
 	LDZ <- NULL
@@ -64,7 +71,7 @@
 	# Trimming the rest:
 	if(lags>1){
 		DY <- DY[-c(1:(lags-1)),]
-		DX <- DX[-c(1:(lags-1)),]
+		if(!is.null(DX)) DX <- DX[-c(1:(lags-1)),]
 		LZ <- LZ[-c(1:(lags-1)),]		
 	}
 
@@ -96,13 +103,22 @@
 		Z2 <- cbind(Z2,seas.dum)
 	}
 
-	R0 <- lm.fit(y=CVAR$DY,x=Z2)$residuals
-	R1 <- lm.fit(y=CVAR$LZ,x=Z2)$residuals
-	colnames(R1) <- c(colnames(R0),paste(colnames(R0),'s',sep=''))
-	if(ddet==1)R1 <- cbind(1,R1)
+	if(!is.null(Z2)){
+    R0 <- lm.fit(y=CVAR$DY,x=Z2)$residuals
+	  R1 <- lm.fit(y=CVAR$LZ,x=Z2)$residuals
+	}  
+  if(is.null(Z2)){
+  R0 <- CVAR$DY
+  R1 <- CVAR$LZ
+  }
+  
+	if(ncol(R1)==2*ncol(R0)) colnames(R1) <- c(colnames(R0),paste(colnames(R0),'s',sep=''))
+	else colnames(R1) <- colnames(R0)
+  
+  if(ddet==1)R1 <- cbind(1,R1)
 	if(ddet==3)R1 <- cbind(1:obs,R1)
 
-
+  
 	S01 <- t(R0)%*%R1/obs
 	S00 <- t(R0)%*%R0/obs
 	S11 <- t(R1)%*%R1/obs
@@ -112,13 +128,16 @@
 	eig <- geigen(A=t(S01) %*% S00i %*% (S01),B=S11)
 	eig.orig <- eig
 	
-
 	# Take the modulus and sort the vectors
 	eig$values <- Mod(eig$values)
 	eig$values <- sort(abs(eig$values),decreasing=TRUE)
 
 	# Eigen vectors: in columns.
 	eig$vectors <- eig$vectors[,order(abs(eig.orig$values),decreasing=TRUE)]
+  
+  # Returning the concentrated first diff and lagged levels.
+  eig$R0 <- R0
+  eig$R1 <- R1
 
 	return(eig)
 }
@@ -152,16 +171,24 @@
 		# adding to the short run det
 		srdet <- cbind(srdet,seas.dum)
 	}
+  
 	#Loop over the possible ranks. 
 	for(r in 0:ncol(CVAR$DY)){
 
 		# Compute the Error correction vector(s).
 		ECM <- NULL
-		if(r>0)ECM <- cbind(cdet,CVAR$LZ)%*%eig$vector[,1:r]
-
+    if(r>0)
+    {
+      evo <- order(abs(eig$values),decreasing=TRUE)
+      beta<- eig$vectors[ ,evo[1:r]]  
+  		if(r>0)ECM <- cbind(cdet,CVAR$LZ)%*%beta
+    }
+    
 		# Plain old ols.
 		x <- cbind(ECM,srdet,CVAR$DX,CVAR$LDZ)
-		sr.cvar <- lm.fit(y=CVAR$DY,x=x)
+		if(!is.null(x))sr.cvar <- lm.fit(y=CVAR$DY,x=x)
+    else sr.cvar <- list()
+    
 		pvec <- sr.cvar$coefficients
 
 		# sorting out the parameters:
@@ -183,9 +210,11 @@
 		   	coef.tmp$psi <- pvec[1:ncol(srdet),]
 			pvec <- pvec[-c(1:ncol(srdet)),]
 			}
-		# Storing the contemporanous first diff of the exo variables
-		coef.tmp$lambda0 <- t(pvec[1:ncol(CVAR$DX),])
-		pvec <- pvec[-c(1:ncol(CVAR$DX)),]
+    if(!is.null(CVAR$DX)){
+  		# Storing the contemporanous first diff of the exo variables
+  		coef.tmp$lambda0 <- t(pvec[1:ncol(CVAR$DX),])
+  		pvec <- pvec[-c(1:ncol(CVAR$DX)),]
+    }
 
 		# storing the lagged first differences
 		if(lags>1){for(l in 2:lags){
@@ -205,26 +234,44 @@
 
 
 # Takes the raw estimated models, formats and returns the residuals.
-.mkresid <- function(pcvar.est){
+.mkresid <- function(pcvar.est,rank=NULL){
 
 	res <- list()
-	for(r in 1:length(pcvar.est[[1]])){
+  
+  if(is.null(rank)) rvec <- 1:length(pcvar.est[[1]])
+  else rvec <- rank+1
+  
+	for(r in rvec){
 		# Storing the residuals for rank r
 		res[[r]] <- pcvar.est[[1]][[r]]$residuals
 		for(i in 2:length(pcvar.est)){res[[r]] <- cbind(res[[r]],pcvar.est[[i]][[r]]$residuals)}
 		}
+  
 return(res)
 }
 
+# A function to get a vector of N log-likelihoods from the residual matrix
+.mkll <- function(reslst,N,rank){
+  # Selecting the residuals
+  res <- reslst[[rank+1]]
+  #Dimensions
+  nvar <- ncol(res)/N
+  nobs <- nrow(res)
+  # Contructing the log-likelihood vector
+  ll <- NULL
+  for(i in 1:N) ll <- c(ll, -(nobs/2)*log(det((var(res[, (1+(i-1)*nvar):(i*nvar) ])))))
+  
+  return(ll)
+}
 
 # Constructs the large weighting matrices to link the panel from the original W matrix. 
 .mkW <- function(W,N,nvar){
 
 	# Creating equal weights if missing W.
 	if(is.null(W))W='equal'
-	if(W=='equal'){
-		W <- matrix(1/(N-1),N,N)
-		diag(W) <- 0}
+  if(length(W)==1){if(W=='equal'){W <- matrix(1/(N-1),N,N);diag(W) <- 0}}
+	if(length(W)==1){if(W=='zero'){W <- matrix(0,N,N)}}
+  
 
 	# Constructing the W matrix
 	w1 <- matrix(0,nrow=2*N,ncol=N)
@@ -241,7 +288,7 @@ return(res)
 
 
 # Creates the full model parameter matrices from the estimated parameters and the big weight matrices
-.mkpcvar <- function(pcvar.est,ddet,lags)
+.mkpcvar <- function(pcvar.est,ddet,lags,rank=NULL)
 {
 	pcvar.coef <- list()
 	p <- length(pcvar.est[[1]])-1
@@ -251,7 +298,10 @@ return(res)
 	par.names <- c('alpha','beta','rho','lambda0','psi')
 	if(lags>1)par.names <- c(par.names,paste('lag',1:(lags-1),sep='_'))	
 
-	for(r in 1:length(pcvar.est[[1]])){
+  rvec <- 1:length(pcvar.est[[1]])
+  if(!is.null(rank)) rvec <- rank + 1
+                   
+	for(r in rvec){
 		pcvar.coef[[r]] <- list()
 		for(pn in par.names){
 			# create a temporary list with the 'pn' parameter for all countries.
@@ -272,16 +322,18 @@ return(pcvar.coef)
 }
 
 
-
 # Computes the roots of the full pcvar
-.roots <- function(pcvar.lev,lags){
-
-	Np <- nrow(pcvar.lev$coefficients[[1]][[1]])
+.roots <- function(pcvar.lev,lags,rank=NULL){
 
 	roots <- list()
-	r <- 1
 
-	for(cl in pcvar.lev$coefficients){	
+  rvec <- 1:length(pcvar.lev[['coefficients']][[1]])
+  if(!is.null(rank)) rvec <- rank + 1
+  
+	Np <- nrow(pcvar.lev$coefficients[[rvec[1]]][[1]])
+
+	for(r in rvec){	
+    cl <- pcvar.lev$coefficients[[r]]
 		companion <- matrix(0, nrow = Np*lags, ncol = Np*lags)
 		companion[1:Np, 1:Np] <- as.matrix(cl$L1)
 		if(lags > 1){
@@ -293,13 +345,12 @@ return(pcvar.coef)
 				}
 			}
 		roots[[r]] <-  Mod(eigen(companion,only.values=TRUE)$values)[1:Np]
-		r <- r+1
 		}
 	return(roots)
 }
 
 # Tranform the estimated parameters of the PCVAR oto the model in level. used to compute roots and generate pseudo data. 
-.mk.pcvar.level <- function(pcvar.coef,res,lags,bigW){
+.mk.pcvar.level <- function(pcvar.coef,res,lags,bigW,rank=NULL,exo=TRUE){
 
 	W0 <- bigW$W0
 	W1 <- bigW$W1
@@ -308,16 +359,23 @@ return(pcvar.coef)
 	coef.lev <- list()
 	res.lev <- list()
 
-	r <- 1
-	for(cf in pcvar.coef){
+  rvec <- 1:length(pcvar.coef)
+  if(!is.null(rank))rvec <- rank + 1
+  
+	for(r in rvec){
+    cf <- pcvar.coef[[r]]
 		coefL <- list()
 		# constructing the A matrix (eq 10 rank paper)
-		A <- diag(Np)-(as.matrix(cf$LAMBDA0))%*%W0
+		if(!is.null(cf$LAMBDA0)) A <- diag(Np)-(as.matrix(cf$LAMBDA0))%*%W0
+    else A <- diag(Np)
 		Ai <- solve(A)
 		# The parameter matrix for the first lag
 		L1 <- diag(Np) # if the rank is 0. 
-		if(!is.null(cf$BETA)) L1 <- Ai%*%(A+as.matrix(cf$ALPHA) %*% t(as.matrix(cf$BETA)) %*% W1)
-
+		if(!is.null(cf$BETA)){
+      if(exo) L1 <- Ai%*%(A + as.matrix(cf$ALPHA) %*% t(as.matrix(cf$BETA)) %*% W1)
+      if(!exo) L1 <- Ai%*%(A + as.matrix(cf$ALPHA) %*% t(as.matrix(cf$BETA)))
+    }
+    
 		coefL$L1 <- L1
 
 		# Constructing the following lag matrices if needed.
@@ -333,7 +391,6 @@ return(pcvar.coef)
 
 		coef.lev[[r]] <- coefL
 		res.lev[[r]] <- Ai%*%t(res[[r]])
-		r <- r+1
 		}
 	return(list('coefficients'=coef.lev,'residuals'=res.lev))
 }
@@ -393,6 +450,100 @@ return(pcvar.coef)
 
 
 
+
+
+# Bootstrap the CCS test:
+.bs.ccs <- function(pcvar.lev,ccs,BS=19,bs.method='resample',rank,lags,Y,W,ddet,Y0=NULL,rts,cores,seasonal=FALSE,season.freq,exo){
+
+  #init
+  N <- length(unique(Y$indiv))
+  r <- rank+1
+  
+  # Storage
+	bs <- list()
+	bs$lr <- matrix(NA,nrow=N,BS+1)
+	bs$lr[,1] <- ccs$lr
+
+	# 1/ Recenter the residuals
+	res <- pcvar.lev$residuals[[r]]-colMeans(pcvar.lev$residuals[[r]])
+	obs <- ncol(res)
+	Np <- nrow(res)
+
+	# Creating a bootstrap function, will be parallelized or not below.
+	for(b in 1:BS){
+		# 2/ make pseudo residuals
+		if(bs.method=='resample')bsres <- res[,ceiling(obs*runif(obs+lags))]
+		if(bs.method=='wild')	bsres <- cbind(matrix(0,ncol=lags,nrow=nrow(res)),res*matrix(rnorm(length(res)),nrow=nrow(res),ncol=ncol(res)))
+
+		# 3/ generate pseudo data
+		Y.bs <- matrix(0,ncol=obs+2*lags,nrow=Np)
+    
+		for(o in (lags+1):(obs+2*lags)){
+			# Summing over the lags:
+			for(l in 1:lags)Y.bs[,o] <- Y.bs[,o]+as.matrix(pcvar.lev$coefficients[[r]][[paste('L',l,sep='')]]%*%Y.bs[,o-l]) 
+			# Adding noise:
+			Y.bs[,o] <-Y.bs[,o]+ bsres[,o-lags]
+			# No deterministics, no intial values as per the paper		
+			}
+    
+		# 4/ format the data matrix to molten format
+		mYbs <- Y
+		mYbs$value <- melt(t(Y.bs[,-c(1:lags)]))$value 
+
+    # 5/ Get the initial value for the BS CCS (computte unrestricted model)
+    # Unrestricted model
+    # Estimating the CVAR and computing the rank test for each individuals.
+    model <- trace.test(mYbs,W,lags,ddet,Y0,seasonal)
+  	# Build the PCVAR for each rk assumption.
+  	pcvar.coef <- .mkpcvar(model$est,ddet,lags)
+  	# Get the unrestricted residuals.
+  	resu <- .mkresid(model$est,rank)    
+    # initial value if not provided. Average of the normalized unrestricted betas.
+    ccsinitbs<-.ccsinit(mYbs,pcvar.coef,rank,exo)
+   
+    
+		# 6/ Estimate the CCS
+    # Calling the core function that calls the optmizer
+    ccscore <- .ccs.core(mYbs,W,rank,lags,ddet,Y0,seasonal,season.freq,ccsinitbs,exo)
+    ccsopt  <- ccscore$ccsopt
+    cvarlst <- ccscore$cvarlst
+    rm(ccscore)
+    gc()  
+    # Constructing and checking the CCS PCVAR
+    # Computing the indiviual SR params 
+    cvarccs <- list()
+  	for(i in 1:length(cvarlst))
+  	{
+  	  CVAR    <- cvarlst[[i]]
+  	  cvsr    <- .ccsSR(CVAR,rbind(ccsopt$ccs,0*ccsopt$ccs),ddet,lags,seasonal,season.freq,exo)
+      cvarccs[[i]] <- list()
+      cvarccs[[i]][[rank+1]] <- cvsr 
+  	}  
+    # Make the PCVAR under CCS
+  	pcvar.ccs <- .mkpcvar(cvarccs,ddet,lags,rank)    
+  	# Get the CCS residuals.
+  	resccs <- .mkresid(cvarccs,rank)
+    # storage
+    ccsbs <- list('ccs'=ccsopt$ccs,'init'=ccsinitbs,'rank'=rank,'roots'=rts[[rank+1]])
+    # Likelihoods:
+    ccsbs$llu <- .mkll(resu,N,rank)
+    ccsbs$llc <- .mkll(resccs,N,rank)
+    # LR test:
+    ccsbs$lr  <- -2*(ccsbs$llc-ccsbs$llu)
+    ccsbs$df  <- ncol(ccsbs$init)*(nrow(ccsbs$init)-ncol(ccsbs$init))
+    ccsbs$pv  <- 1-pchisq(ccsbs$lr,ccsbs$df)
+    
+    # Panel stats (std normal)
+    ccsbs$ppv <- sum(-2*log(ccsbs$pv)-2)/sqrt(4*N) # pooled p-values, reject for large 
+    ccsbs$plr <- sum(ccsbs$lr-ccsbs$df)/sqrt(2*ccsbs$df*N)# pooled LR, reject for small
+    
+    #storing 
+    bs$lr[,b+1] <- ccsbs$lr
+  	}
+  
+	# 7/ return trace test for each iteration
+	return(bs)
+}
 
 
 
